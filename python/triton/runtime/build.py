@@ -3,22 +3,22 @@ from __future__ import annotations
 import functools
 import hashlib
 import importlib.util
+import logging
 import os
 import re
 import shutil
 import subprocess
+import sys
 import sysconfig
 import tempfile
-import logging
 from pathlib import Path
-
 from types import ModuleType
 
-from .cache import get_cache_manager
 from .. import knobs
+from .cache import get_cache_manager
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def _find_compiler(language: str) -> str:
     if language == "c":
         cc = os.environ.get("CC")
@@ -74,6 +74,9 @@ def _build(name: str, src: str, srcdir: str, library_dirs: list[str], include_di
     include_dirs = include_dirs + [srcdir, py_include_dir, *custom_backend_dirs]
     # for -Wno-psabi, see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111047
     cc_cmd = [cc, src, "-O3", "-shared", "-fPIC", "-Wno-psabi", "-o", so]
+    if sys.platform == "darwin":
+        cc_cmd[3] = "-bundle"
+        cc_cmd += ["-undefined", "dynamic_lookup"]
     if language == "c++":
         cc_cmd.insert(3, "-std=c++17")
     cc_cmd += [_library_flag(lib) for lib in libraries]
@@ -93,7 +96,7 @@ def _library_flag(lib: str) -> str:
 
 @functools.lru_cache
 def platform_key() -> str:
-    from platform import machine, system, architecture
+    from platform import architecture, machine, system
     return ",".join([machine(), system(), *architecture()])
 
 
@@ -131,8 +134,10 @@ def _get_cache_manager(src: bytes, config: dict[str, list[str] | None]):
 
 def _compile_so(src: bytes, src_path: str, name: str, library_dirs: list[str] | None, include_dirs: list[str] | None,
                 libraries: list[str] | None, ccflags: list[str] | None, load_module: bool, language: str):
-    config = dict(language=[language], library_dirs=library_dirs, include_dirs=include_dirs, libraries=libraries,
-                  ccflags=ccflags)
+    config = {
+        "language": [language], "library_dirs": library_dirs, "include_dirs": include_dirs, "libraries": libraries,
+        "ccflags": ccflags
+    }
     cache = _get_cache_manager(src, config=config)
     suffix = sysconfig.get_config_var("EXT_SUFFIX")
     cache_path = cache.get_file(f"{name}{suffix}")

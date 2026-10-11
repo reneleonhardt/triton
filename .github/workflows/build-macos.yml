@@ -20,13 +20,14 @@ jobs:
     name: Build MacOS
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: "true"
       - name: Install brew dependencies
         run: |
           brew update
-          brew install ccache llvm@19 lld coreutils
+          brew install ccache llvm lld coreutils
       - name: Compute cache keys
         id: cache-key
         run: |
@@ -42,14 +43,16 @@ jobs:
           fi
 
           # Process the files if they exist
-          echo "llvm=$(sha256sum $llvm_file | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
-          echo "nvidia=$(sha256sum $nvidia_file | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
-          echo "amd=$(sha256sum $amd_file | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
-          echo "json=$(cat $json_file)" >> $GITHUB_OUTPUT
-          echo "datetime=$(date -u -Iseconds)" >> $GITHUB_OUTPUT
+          {
+            echo "llvm=$(sha256sum "$llvm_file" | cut -d ' ' -f 1)"
+            echo "nvidia=$(sha256sum "$nvidia_file" | cut -d ' ' -f 1)"
+            echo "amd=$(sha256sum "$amd_file" | cut -d ' ' -f 1)"
+            echo "json=$(cat "$json_file")"
+            echo "datetime=$(date -u -Iseconds)"
+          } >> "$GITHUB_OUTPUT"
         shell: bash
       - name: Cache build dependencies
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           # Note that we cannot use environment variables here given there is
           # no shell to interpret them in the paths.
@@ -67,7 +70,7 @@ jobs:
         name: Restore cache of ccache and Triton compilation artifacts
         id: restore-build-cache
         if: github.ref != 'refs/heads/main'
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.ccache
@@ -88,12 +91,13 @@ jobs:
           du -h -d 1 ~/.ccache
       - name: Update PATH
         run: |
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-          echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
       - name: Create venv
         run: |
           python3 -m venv ~/.venv
-          source ~/.venv/bin/activate
+          # shellcheck source=/dev/null
+          source "$HOME/.venv/bin/activate"
           python3 -m pip install --upgrade pip
       - name: Install Triton
         env:
@@ -104,14 +108,16 @@ jobs:
           # Add elapsed time in seconds to ninja status to monitor where build stalls
           NINJA_STATUS: "[%f/%t, %es elapsed] "
         run: |
-          source ~/.venv/bin/activate
+          # shellcheck source=/dev/null
+          source "$HOME/.venv/bin/activate"
           echo "PATH is '$PATH'"
           ccache --zero-stats
-          export PATH="/opt/homebrew/opt/llvm@19/bin:$PATH"
-          export CC="/opt/homebrew/opt/llvm@19/bin/clang"
-          export CXX="/opt/homebrew/opt/llvm@19/bin/clang++"
+          llvm_prefix="$(brew --prefix llvm)"
+          export PATH="$llvm_prefix/bin:$PATH"
+          export CC="$llvm_prefix/bin/clang"
+          export CXX="$llvm_prefix/bin/clang++"
           export CXXFLAGS="-stdlib=libc++"
-          export LDFLAGS="-L/opt/homebrew/opt/llvm@19/lib"
+          export LDFLAGS="-L$llvm_prefix/lib"
           which clang++
           clang++ --version
           make dev-install
@@ -131,7 +137,7 @@ jobs:
         # evicts cache entries LRU, but maybe this saves a bit of time in CI.)
         name: Save ccache and Triton compilation artifacts to cache
         if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.ccache

@@ -1,6 +1,10 @@
 [build-system]
-requires = ["setuptools>=40.8.0", "cmake>=3.20,<4.0", "ninja>=1.11.1", "nanobind==2.10.2"]
+requires = ["setuptools>=40.8.0", "cmake>=3.20", "ninja>=1.11.1", "nanobind>=3.1.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
 
 [tool.mypy]
 mypy_path = "$MYPY_CONFIG_FILE_DIR/python"
@@ -38,3 +42,12 @@ ignore = ["E501", "E701", "E731", "E741"]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
+
+[dependency-groups]
+wheel-tests = [
+    "expecttest",
+    "pytest",
+]
+wheels = [
+    "cibuildwheel>=4.3.1",
+]

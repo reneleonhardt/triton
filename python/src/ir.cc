@@ -339,6 +339,7 @@ void init_triton_ir(py::module_ &m) {
       .def(py::init<llvm::SourceMgr &, MLIRContext *>());
 
   static std::vector<mlir::triton::plugin::TritonPlugin> plugins;
+  static py::ft_mutex pluginsMutex;
   m.def(
       "extend_dialects_with",
       [](const std::string &libPath) {
@@ -351,6 +352,7 @@ void init_triton_ir(py::module_ &m) {
         auto plugin = std::move(*pluginOrErr);
 
         // Store the plugin for later (i.e., `load_dialects`)
+        py::ft_lock_guard guard(pluginsMutex);
         plugins.push_back(std::move(plugin));
       },
       "Given a path to a Triton extension, register any dialects to be loaded "
@@ -360,8 +362,10 @@ void init_triton_ir(py::module_ &m) {
     DialectRegistry registry;
 
     // Register plugin dialects.
-    for (const auto &plugin : plugins) {
-      plugin.registerDialects(registry);
+    {
+      py::ft_lock_guard guard(pluginsMutex);
+      for (const auto &plugin : plugins)
+        plugin.registerDialects(registry);
     }
 
     registry.insert<TritonDialect, ::mlir::triton::gpu::TritonGPUDialect,

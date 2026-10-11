@@ -341,11 +341,28 @@ if(TRITON_BUILD_PYTHON_MODULE)
   endif()
 
   find_package(nanobind CONFIG REQUIRED HINTS "${Python3_SITELIB}")
-  nanobind_build_library(nanobind-static)
-  if(TRITON_STABLE_ABI)
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -c "import sysconfig; print(int(bool(sysconfig.get_config_var('Py_GIL_DISABLED'))))"
+    OUTPUT_VARIABLE TRITON_PYTHON_FREE_THREADED
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY)
+  if(TRITON_PYTHON_FREE_THREADED AND TRITON_BUILD_PROTON)
+    message(FATAL_ERROR "Free-threaded compiler builds currently require TRITON_BUILD_PROTON=OFF; Proton is not validated for this ABI.")
+  endif()
+  if(TRITON_PYTHON_FREE_THREADED)
+    nanobind_build_library(nanobind-static-ft)
+    add_library(nanobind-static ALIAS nanobind-static-ft)
+  else()
+    nanobind_build_library(nanobind-static)
+  endif()
+  if(TRITON_STABLE_ABI AND NOT TRITON_PYTHON_FREE_THREADED)
     target_compile_definitions(nanobind-static PUBLIC Py_LIMITED_API=0x030C0000)
   endif()
-  target_link_libraries(nanobind-static PRIVATE Python3::Module)
+  if(TRITON_PYTHON_FREE_THREADED)
+    target_link_libraries(nanobind-static-ft PRIVATE Python3::Module)
+  else()
+    target_link_libraries(nanobind-static PRIVATE Python3::Module)
+  endif()
 
   foreach(CODEGEN_BACKEND ${TRITON_CODEGEN_BACKENDS})
     add_subdirectory(third_party/${CODEGEN_BACKEND})

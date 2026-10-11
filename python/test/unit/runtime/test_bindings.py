@@ -1,12 +1,12 @@
-import triton
-import triton.language as tl
-
-import torch
 import math
 import subprocess
 import sys
+import sysconfig
 import textwrap
+
 import pytest
+import triton
+import triton.language as tl
 
 _BLOCK_SIZE = 16
 
@@ -27,6 +27,7 @@ def test_llvm_ir_to_bitcode_reports_invalid_ir():
         llvm.to_bitcode("invalid LLVM IR")
 
 
+@pytest.mark.skipif(sysconfig.get_config_var("Py_GIL_DISABLED"), reason="nanobind free-threaded types are immortal")
 def test_binding_classes_released_at_shutdown():
     script = textwrap.dedent("""
         import os
@@ -52,6 +53,49 @@ def test_binding_classes_released_at_shutdown():
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
     assert set(result.stdout.splitlines()) == {"builder released", "layout released"}, result.stderr
     assert "nanobind: leaked" not in result.stderr
+
+
+@pytest.mark.skipif(not sysconfig.get_config_var("Py_GIL_DISABLED"), reason="free-threaded Python only")
+def test_free_threaded_bindings():
+    # A fresh process catches extensions silently enabling the GIL at import.
+    script = textwrap.dedent("""
+        import sys
+        assert not sys._is_gil_enabled()
+        import triton
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        from triton._C.libtriton import ir, llvm, native_specialize_impl
+        from triton.backends.compiler import BaseBackend
+        from triton.tools.tensor_descriptor import TensorDescriptor
+        assert not sys._is_gil_enabled()
+        barrier = Barrier(4)
+
+        class Tensor:
+            dtype = "float32"
+            def data_ptr(self):
+                return 16
+
+        def compile_in_thread(worker):
+            barrier.wait()
+            for i in range(50):
+                value = worker * 50 + i + 2
+                assert native_specialize_impl(BaseBackend, value, False, False, True) == ("i32", None)
+                assert native_specialize_impl(BaseBackend, Tensor(), False, False, True) == ("*fp32", None)
+                descriptor = object.__new__(TensorDescriptor)
+                descriptor.base, descriptor.block_shape = Tensor(), [16]
+                assert native_specialize_impl(BaseBackend, descriptor, False, False, True) == ("tensordesc<fp32[16]>", None)
+                context = ir.context()
+                ir.load_dialects(context)
+                llvm.init_targets()
+                assert llvm.to_bitcode("define void @kernel() { ret void }").startswith(b"BC")
+            return True
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            assert all(pool.map(compile_in_thread, range(4)))
+        assert not sys._is_gil_enabled()
+    """)
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=60, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @triton.jit
@@ -83,6 +127,7 @@ def test_module_walk(device):
     """
     Test the MLIR bindings exposed for the out-of-tree walk.
     """
+    import torch
 
     def walk_fn(op):
         name = op.get_name()
@@ -136,8 +181,8 @@ def test_module_walk(device):
     )
 
     context = triton._C.libtriton.ir.context()
-    options = backend.parse_options(dict())
-    codegen_fns = dict()
+    options = backend.parse_options({})
+    codegen_fns = {}
     module_map = backend.get_module_map()
     triton._C.libtriton.ir.load_dialects(context)
     backend.load_dialects(context)
@@ -147,6 +192,7 @@ def test_module_walk(device):
 
 
 def test_python_func_in_visit_call(device):
+    import torch
 
     @triton.jit
     def test_py_call_const_kernel(

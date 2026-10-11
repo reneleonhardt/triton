@@ -491,7 +491,7 @@ def add_links(external_only):
 class plugin_bdist_wheel(bdist_wheel):
 
     def get_tag(self):
-        if check_env_flag("TRITON_STABLE_ABI"):
+        if check_env_flag("TRITON_STABLE_ABI") and not sysconfig.get_config_var("Py_GIL_DISABLED"):
             return "cp312", "abi3", super().get_tag()[2]
         return super().get_tag()
 

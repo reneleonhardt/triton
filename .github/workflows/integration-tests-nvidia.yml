@@ -31,8 +31,9 @@ jobs:
       CCACHE_COMPRESS: "true"
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: "true"
       - name: Compute cache keys
         id: cache-key
@@ -49,14 +50,16 @@ jobs:
           fi
 
           # Process the files if they exist
-          echo "llvm=$(sha256sum $llvm_file | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
-          echo "nvidia=$(sha256sum $nvidia_file | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
-          echo "amd=$(sha256sum $amd_file | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
-          echo "json=$(cat $json_file)" >> $GITHUB_OUTPUT
+          {
+            echo "llvm=$(sha256sum "$llvm_file" | cut -d ' ' -f 1)"
+            echo "nvidia=$(sha256sum "$nvidia_file" | cut -d ' ' -f 1)"
+            echo "amd=$(sha256sum "$amd_file" | cut -d ' ' -f 1)"
+            echo "json=$(cat "$json_file")"
+          } >> "$GITHUB_OUTPUT"
         shell: bash
       - name: Restore build dependencies cache
         id: restore-build-deps-cache
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           # Note that we cannot use environment variables here given there is
           # no shell to interpret them in the paths.
@@ -75,12 +78,12 @@ jobs:
           du -h -d 1 ~/.ccache
       - name: Update PATH
         run: |
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Setup Python environment for NVIDIA self-hosted runners
         run: |
-          echo "/venv/bin" >> $GITHUB_PATH
-          echo "VIRTUAL_ENV=/venv" >> $GITHUB_ENV
-          echo "PYTHONHOME=" >> $GITHUB_ENV
+          echo "/venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=/venv" >> "$GITHUB_ENV"
+          echo "PYTHONHOME=" >> "$GITHUB_ENV"
       - name: Install Triton
         env:
           CUDA_HOME: "/usr/local/cuda"
@@ -136,7 +139,7 @@ jobs:
           du -h -d 1 ~/.ccache
       - name: Save build dependencies cache
         if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.triton/llvm

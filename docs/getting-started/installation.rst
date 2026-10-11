@@ -16,6 +16,11 @@ You can install the latest stable release of Triton from pip:
 
 Binary wheels are available for CPython 3.10-3.14.
 
+The development branch supports CPython 3.11-3.15. Its wheel workflow builds
+a CPython 3.11 wheel and a CPython 3.12 ``abi3`` wheel, then tests the latter
+on CPython 3.12-3.15. These development wheels are separate from the
+published stable releases.
+
 -----------
 From Source
 -----------

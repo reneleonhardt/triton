@@ -1,9 +1,11 @@
 #include <Python.h>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <mutex>
 #include <nanobind/nanobind.h>
 #include <string>
 #include <string_view>
@@ -80,6 +82,28 @@ static TypeHandlerCache type_handler_cache;
 py::object from_new_ref(py::handle val) { return py::steal<py::object>(val); }
 py::object from_borrowed_ref(py::handle val) {
   return py::borrow<py::object>(val);
+}
+
+// Never hold a native cache lock while invoking a Python callback.
+static py::ft_mutex dtype_cache_mutex;
+
+template <typename Cache, typename Key, typename Compute>
+py::object cached_dtype(Cache &cache, const Key &key, Compute compute) {
+  {
+    py::ft_lock_guard guard(dtype_cache_mutex);
+    auto it = cache.find(key);
+    if (it != cache.end())
+      return from_borrowed_ref(it->second);
+  }
+  py::object value = compute();
+  if (!value)
+    return value;
+  {
+    py::ft_lock_guard guard(dtype_cache_mutex);
+    if (cache.emplace(key, value.ptr()).second)
+      Py_INCREF(value.ptr());
+  }
+  return value;
 }
 
 const char *unicode_as_utf8(PyObject *obj) {
@@ -165,10 +189,19 @@ bool init_globals() noexcept try {
   constexpr_cls = import_from("triton.language", "constexpr");
 
   PyObject *loaded_modules = PyImport_GetModuleDict();
-  PyObject *torch_module = PyDict_GetItemString(loaded_modules, "torch");
+  auto torch_name = from_new_ref(PyUnicode_FromString("torch"));
+  if (!torch_name)
+    return false;
+  auto torch_module =
+      from_new_ref(PyObject_GetItem(loaded_modules, torch_name.ptr()));
+  if (!torch_module) {
+    if (!PyErr_ExceptionMatches(PyExc_KeyError))
+      return false;
+    PyErr_Clear();
+  }
   if (torch_module) {
     auto tensor_cls =
-        from_new_ref(PyObject_GetAttrString(torch_module, "Tensor"));
+        from_new_ref(PyObject_GetAttrString(torch_module.ptr(), "Tensor"));
     if (!tensor_cls)
       return false;
     torch_tensor_cls = tensor_cls.release().ptr();
@@ -194,22 +227,15 @@ std::pair<py::object, py::object> specialize_tensordesc(PyObject *arg,
   if (!dtype)
     return {};
 
-  PyObject *type_str;
   Py_hash_t dtype_hash = PyObject_Hash(dtype.ptr());
   if (dtype_hash == -1)
     return {};
-  DTypeKey dsk{dtype_hash};
-  auto it = dtype2str.find(dsk);
-  if (it != dtype2str.end()) {
-    type_str = it->second;
-  } else {
-    auto res = from_new_ref(PyObject_CallFunctionObjArgs(canonicalize_dtype_fn,
-                                                         dtype.ptr(), nullptr));
-    if (!res)
-      return {};
-    dtype2str[dsk] = res.ptr();
-    type_str = res.release().ptr();
-  }
+  auto type_str = cached_dtype(dtype2str, DTypeKey{dtype_hash}, [&]() {
+    return from_new_ref(PyObject_CallFunctionObjArgs(canonicalize_dtype_fn,
+                                                     dtype.ptr(), nullptr));
+  });
+  if (!type_str)
+    return {};
 
   std::string desc_cstr;
   desc_cstr.reserve(128);
@@ -224,7 +250,7 @@ std::pair<py::object, py::object> specialize_tensordesc(PyObject *arg,
   }
 
   desc_cstr = is_im2col ? "tensordesc_im2col<" : "tensordesc<";
-  auto dtype_str = from_new_ref(PyObject_Str(type_str));
+  auto dtype_str = from_new_ref(PyObject_Str(type_str.ptr()));
   if (!dtype_str)
     return {};
 
@@ -340,21 +366,14 @@ std::pair<py::object, py::object> handle_tensor(PyObject *backend,
   if (dtype_hash == -1)
     return {};
 
-  DTypePtrKey dsk{dtype_hash, is_const};
-  auto it = dtype_ptr2str.find(dsk);
-
-  py::handle type_str;
-  if (it != dtype_ptr2str.end()) {
-    type_str = it->second;
-  } else {
-    auto canon_res =
-        PyObject_CallFunctionObjArgs(canonicalize_ptr_dtype_fn, dtype.ptr(),
-                                     is_const ? Py_True : Py_False, nullptr);
-    if (!canon_res)
-      return {};
-    dtype_ptr2str[dsk] = canon_res;
-    type_str = canon_res;
-  }
+  auto type_str =
+      cached_dtype(dtype_ptr2str, DTypePtrKey{dtype_hash, is_const}, [&]() {
+        return from_new_ref(PyObject_CallFunctionObjArgs(
+            canonicalize_ptr_dtype_fn, dtype.ptr(),
+            is_const ? Py_True : Py_False, nullptr));
+      });
+  if (!type_str)
+    return {};
 
   // handle alignment specialization of a tensor
   if (!specialize_value) {
@@ -600,11 +619,28 @@ std::pair<py::object, py::object> specialize_arg(PyObject *backend,
 // main entry-point from Python implementing specialization logic natively
 PyObject *specialize_impl(PyObject *self, PyObject *const *args,
                           Py_ssize_t nargs) {
-  if (!init_called) {
-    if (!init_globals()) {
+#if defined(NB_FREE_THREADED)
+  static std::once_flag init_flag;
+  static std::atomic<bool> init_ready{false};
+  if (!init_ready.load(std::memory_order_acquire)) {
+    try {
+      // Waiting threads must detach so the initializer can run Python imports.
+      py::gil_scoped_release detach;
+      std::call_once(init_flag, []() {
+        py::gil_scoped_acquire attach;
+        if (!init_globals())
+          throw py::python_error();
+        init_ready.store(true, std::memory_order_release);
+      });
+    } catch (py::python_error &error) {
+      error.restore();
       return nullptr;
     }
   }
+#else
+  if (!init_called && !init_globals())
+    return nullptr;
+#endif
 
   if (nargs != 5) {
     PyErr_SetString(PyExc_TypeError,
@@ -682,10 +718,12 @@ bool visit_make_tensordesc_args(PyObject *arg, PyObject *sig,
         continue;
       }
 
+      py::object owned_meta;
       PyObject *meta = Py_None;
       if (has_tensordesc_meta) {
-        // Borrowed reference
-        meta = PyList_GetItem(tensordesc_meta, *tensordesc_idx);
+        owned_meta =
+            from_new_ref(PySequence_GetItem(tensordesc_meta, *tensordesc_idx));
+        meta = owned_meta.ptr();
         if (!meta)
           return false;
       }
@@ -708,11 +746,14 @@ bool visit_make_tensordesc_args(PyObject *arg, PyObject *sig,
     if (!key)
       return false;
 
-    // Borrowed ref
-    PyObject *inner_relevant_paths =
-        PyDict_GetItemWithError(relevant_paths, key.ptr());
-    if (PyErr_Occurred())
-      return false;
+    auto owned_paths =
+        from_new_ref(PyObject_GetItem(relevant_paths, key.ptr()));
+    PyObject *inner_relevant_paths = owned_paths.ptr();
+    if (!owned_paths) {
+      if (!PyErr_ExceptionMatches(PyExc_KeyError))
+        return false;
+      PyErr_Clear();
+    }
 
     if (!inner_relevant_paths) {
       // Short-circuit if tuple doesn't contain any tensordesc args

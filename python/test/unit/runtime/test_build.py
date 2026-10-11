@@ -4,14 +4,13 @@ import argparse
 import hashlib
 import io
 import json
-import pytest
 import tarfile
 import tempfile
-
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 import triton
-
 from triton.runtime.build import compile_module_from_src
 
 TEST_MODULE_C = """
@@ -51,26 +50,45 @@ PyMODINIT_FUNC PyInit_test_module(void) {
     return NULL;
   }
   PyModule_AddFunctions(m, ModuleMethods);
+#ifdef Py_GIL_DISABLED
+  PyUnstable_Module_SetGIL(m, Py_MOD_GIL_NOT_USED);
+#endif
   return m;
 }
 """
 
 
-def test_compile_module(fresh_triton_cache):
-    mod = compile_module_from_src(TEST_MODULE_C, "test_module")
+@pytest.mark.parametrize("language", ["c", "c++"])
+def test_compile_module(fresh_triton_cache, language):
+    mod = compile_module_from_src(TEST_MODULE_C, "test_module", language=language)
 
-    with pytest.raises(Exception):
+    with pytest.raises(TypeError, match="exactly 1 argument"):
         mod.go()
 
     assert mod.go("huh") == "huh"
     assert mod.go("hello") == "hiya"
 
     # Make sure the module is cached
-    mod2 = compile_module_from_src(TEST_MODULE_C, "test_module")
+    mod2 = compile_module_from_src(TEST_MODULE_C, "test_module", language=language)
     assert mod2.__file__ == mod.__file__
 
 
-def test_compile_module_bad_cache(fresh_knobs):
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_build_python_linker_flags(platform, monkeypatch, tmp_path):
+    from triton.runtime import build
+
+    commands = []
+    monkeypatch.setattr(build, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setattr(build, "_find_compiler", lambda _: "cc")
+    monkeypatch.setattr(build.subprocess, "check_call", lambda cmd, **kwargs: commands.append(cmd))
+    build._build("module", "module.c", str(tmp_path), [], [], [], [])
+    cmd = commands[0]
+    assert ("-bundle" in cmd) == (platform == "darwin")
+    assert ("-shared" in cmd) == (platform != "darwin")
+    assert ("dynamic_lookup" in cmd) == (platform == "darwin")
+
+
+def test_compile_module_bad_cache(fresh_triton_cache, monkeypatch):
     with tempfile.TemporaryDirectory() as tmpd:
         tmp = Path(tmpd)
         called_get_file = False
@@ -84,12 +102,12 @@ def test_compile_module_bad_cache(fresh_knobs):
                 return str(tmp / filename)
 
         # First corrupt the cache
-        fresh_knobs.cache.manager_class = InvalidFileCacheManager
+        monkeypatch.setattr(triton.knobs.cache, "manager_class", InvalidFileCacheManager)
 
         mod = compile_module_from_src(TEST_MODULE_C, "test_module")
         assert called_get_file
 
-        with pytest.raises(Exception):
+        with pytest.raises(TypeError, match="exactly 1 argument"):
             mod.go()
 
         assert mod.go("huh") == "huh"

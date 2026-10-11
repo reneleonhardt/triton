@@ -11,33 +11,35 @@ on:
 concurrency:
   group: ${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-permissions: read-all
+permissions:
+  contents: read
+  actions: read
 
 jobs:
 
   runner-preparation:
-    uses: ./.github/workflows/runner-preparation.yml
+    uses: $/.github/workflows/runner-preparation.yml
 
   pre-commit:
-    uses: ./.github/workflows/pre-commit.yml
+    uses: $/.github/workflows/pre-commit.yml
 
   integration-tests-nvidia:
     needs: runner-preparation
     if: needs.runner-preparation.outputs.matrix-NVIDIA != ''
-    uses: ./.github/workflows/integration-tests-nvidia.yml
+    uses: $/.github/workflows/integration-tests-nvidia.yml
     with:
       matrix: ${{ needs.runner-preparation.outputs.matrix-NVIDIA }}
 
   integration-tests-amd:
     needs: runner-preparation
     if: needs.runner-preparation.outputs.matrix-AMD != ''
-    uses: ./.github/workflows/integration-tests-amd.yml
+    uses: $/.github/workflows/integration-tests-amd.yml
     with:
       matrix: ${{ needs.runner-preparation.outputs.matrix-AMD }}
 
   build-macos:
     needs: runner-preparation
     if: needs.runner-preparation.outputs.matrix-MACOS != ''
-    uses: ./.github/workflows/build-macos.yml
+    uses: $/.github/workflows/build-macos.yml
     with:
       matrix: ${{ needs.runner-preparation.outputs.matrix-MACOS }}

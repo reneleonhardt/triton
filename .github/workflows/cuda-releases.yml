@@ -1,0 +1,26 @@
+name: CUDA release advisory
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/scripts/check_cuda_releases.py
+      - .github/workflows/cuda-releases.yml
+
+permissions:
+  contents: read
+
+jobs:
+  releases:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test release comparison
+        run: python3 -m doctest .github/scripts/check_cuda_releases.py
+      - name: Check official stable releases
+        run: python3 .github/scripts/check_cuda_releases.py --torch-version .github/workflows/integration-tests-amd.yml --components cmake/nvidia-toolchain-version.json

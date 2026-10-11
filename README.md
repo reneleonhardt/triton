@@ -38,6 +38,11 @@ pip install triton
 
 Binary wheels are available for CPython 3.10-3.14.
 
+The development branch supports CPython 3.11-3.15. Its wheel workflow builds
+a CPython 3.11 wheel and a CPython 3.12 `abi3` wheel, then tests the latter
+on CPython 3.12-3.15. These development wheels are separate from the
+published stable releases.
+
 # Install from source
 
 ```shell
@@ -318,3 +323,6 @@ the [triton-dev-containers repository](https://github.com/redhat-et/triton-dev-c
 
 For detailed instructions on how to use the dev containers, please see
 the [dev container user guide](https://github.com/redhat-et/triton-dev-containers/blob/main/.devcontainer/devcontainer.md).
+
+See [dependency compatibility](docs/dependency-compatibility.md) for Python ABIs,
+remaining build constraints, and automated dependency maintenance.

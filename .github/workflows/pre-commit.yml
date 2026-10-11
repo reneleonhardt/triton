@@ -9,18 +9,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
-      - uses: actions/setup-python@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
           cache: 'pip'
       - name: Compute hash of pre-commit config
         id: cache-key
         run: |
-          echo "pre_commit_hash=$(sha256sum .pre-commit-config.yaml | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
+          echo "pre_commit_hash=$(sha256sum .pre-commit-config.yaml | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
         shell: bash
       - name: Cache pre-commit's cache dir
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           # Note that we cannot use environment variables here given there is
           # no shell to interpret them in the paths.

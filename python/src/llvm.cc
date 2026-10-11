@@ -931,12 +931,10 @@ void init_triton_llvm(py::module_ &m) {
       // Installed exactly once, before any target compilation. The dispatcher
       // reads thread-local state and is safe for parallel codegen.
       installTritonDAGScheduler();
+      // Disable LLVM's global thread pool: forked children inherit its state
+      // without its threads, causing SIGABRT during use or cleanup.
+      llvm::parallel::strategy = llvm::hardware_concurrency(1);
     });
-    // Disable LLVM's internal parallelism. Triton kernels produce small LLVM
-    // modules where pass-level parallelism is not beneficial, and LLVM's global
-    // thread pool is not fork-safe: a forked child inherits the pool's state
-    // but not its threads, causing SIGABRT on use or cleanup.
-    llvm::parallel::strategy = llvm::hardware_concurrency(1);
   });
 
   m.def("link_extern_libs", [](llvm::Module *dstMod,
