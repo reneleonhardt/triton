@@ -298,6 +298,11 @@ endif()
 include_directories(".")
 # LLVM/MLIR range comparisons can trigger -Wambiguous-reversed-operator in
 # C++20. Treat these external headers as system includes.
+if(APPLE)
+  # SDK C headers must follow the compiler's libc++ wrappers.
+  list(FILTER MLIR_INCLUDE_DIRS EXCLUDE REGEX "\\.sdk/usr/include$")
+  list(FILTER LLVM_INCLUDE_DIRS EXCLUDE REGEX "\\.sdk/usr/include$")
+endif()
 include_directories(SYSTEM ${MLIR_INCLUDE_DIRS} ${LLVM_INCLUDE_DIRS})
 include_directories(${PROJECT_SOURCE_DIR}/include)
 include_directories(${PROJECT_BINARY_DIR}/include) # Tablegen'd files
