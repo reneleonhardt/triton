@@ -40,9 +40,9 @@ jobs:
               --env-file /etc/podinfo/gha-gpu-isolation-settings
               --volume /home/runner/.triton:/github/home/.triton
               --volume /triton-data:/triton-data
-          - image: tritonci/triton-amd-ci:rocm10.1.0a20260820-pytorch2.15.0a0-gfx942-gfx950-gfx1250-r1
+          - image: tritonci/triton-amd-ci:rocm10.2.0a20260929-pytorch2.15.0a0-gfx942-gfx950-gfx1250-r1
             runner: ["amd-gfx950"]
-            image_variant: "rocm10.1"
+            image_variant: "therock"
             # We add --env-file to pull in HIP_VISIBLE_DEVICES and ROCR_VISIBLE_DEVICES definition for GPU isolation.
             options: >-
               --device=/dev/kfd --device=/dev/dri --security-opt seccomp=unconfined --group-add video --user root
@@ -56,7 +56,7 @@ jobs:
       TRITON_BUILD_WITH_CLANG_LLD: "TRUE"
       TRITON_USE_ASSERT_ENABLED_LLVM: "TRUE"
       TRITON_DISABLE_LINE_INFO: 1
-      PROTON_SKIP_PC_SAMPLING_TEST: ${{ matrix.image_variant == 'rocm10.1' && '0' || '1' }}
+      PROTON_SKIP_PC_SAMPLING_TEST: ${{ matrix.image_variant == 'therock' && '0' || '1' }}
       PROTON_SKIP_CUDAGRAPH_TEST: 1
       PYTHON: "python3"
       # Time out individual tests so a hang names the test instead of silently

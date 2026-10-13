@@ -34,33 +34,17 @@ OPTIONAL_BUILD_ARGUMENTS = (
 BUILD_ARGUMENTS = REQUIRED_BUILD_ARGUMENTS + OPTIONAL_BUILD_ARGUMENTS
 
 CONFIGURATIONS = {
-    # Mirrors the ROCm and PyTorch versions shared by the current gfx942 and
-    # gfx950 CI runners while building independently from an Ubuntu base.
-    "rocm-7.2.4-pytorch-2.10-gfx942-gfx950": {
-        "tag": "rocm7.2.4-pytorch2.10.0-gfx942-gfx950-r1",
+    "rocm-10.1-pytorch-2.14-gfx942-gfx950": {
+        "tag": "rocm10.1.0-pytorch2.14.0-gfx942-gfx950-r1",
         "build_args": {
             "BASE_IMAGE": ("ubuntu@sha256:"
                            "4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90"),
-            "ROCM_VERSION": "7.2.4",
-            "ROCM_RELEASE_TYPE": "pre-therock",
-            "ROCM_REPO_DIRECTORY": "7.2.4",
-            "PYTORCH_VERSION": ("2.10.0+rocm7.2.4.lw.git3d3aa833"),
-            "PYTORCH_INDEX_URL": ("https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.4/"),
+            "ROCM_VERSION": "10.1.0",
+            "ROCM_RELEASE_TYPE": "stable",
+            "ROCM_REPO_DIRECTORY": "whl-next",
+            "PYTORCH_VERSION": "2.14.0+rocm10.1.0",
+            "PYTORCH_INDEX_URL": "https://stable.repo.amd.com/rocm/whl-next/",
             "PYTORCH_GPU_TARGETS": "gfx942,gfx950",
-        },
-    },
-    "rocm-10.1-pytorch-2.15-nightly-20260820": {
-        "tag": ("rocm10.1.0a20260820-pytorch2.15.0a0-"
-                "gfx942-gfx950-gfx1250-r1"),
-        "build_args": {
-            "BASE_IMAGE": ("ubuntu@sha256:"
-                           "4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90"),
-            "ROCM_VERSION": "10.1.0a20260820",
-            "ROCM_RELEASE_TYPE": "nightlies",
-            "ROCM_REPO_DIRECTORY": "20260820-32315755045",
-            "PYTORCH_VERSION": "2.15.0a0+rocm10.1.0a20260820",
-            "PYTORCH_INDEX_URL": ("https://rocm.nightlies.amd.com/whl-multi-arch/"),
-            "PYTORCH_GPU_TARGETS": "gfx942,gfx950,gfx1250",
         },
     },
     "rocm-10.2-pytorch-2.15-nightly-20260929": {
