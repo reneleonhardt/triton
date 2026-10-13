@@ -13,6 +13,8 @@ on:
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    env:
+      enable_integration: 'true'
     outputs:
       matrix-NVIDIA: ${{ steps.set-matrix.outputs.matrix-NVIDIA }}
       matrix-AMD: ${{ steps.set-matrix.outputs.matrix-AMD }}

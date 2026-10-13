@@ -1,6 +1,8 @@
 name: Wheels
 on:
   workflow_dispatch:
+  push:
+    branches: [chore/update-dependencies]
   pull_request:
     paths:
       - .github/workflows/wheels.yml
@@ -20,7 +22,7 @@ permissions:
 jobs:
 
   Build-Wheels:
-    if: github.repository == 'triton-lang/triton' || github.event_name == 'workflow_dispatch'
+    if: github.repository == 'triton-lang/triton' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     timeout-minutes: 180
     runs-on: ${{ matrix.config.runs_on }}
 
@@ -28,7 +30,7 @@ jobs:
       fail-fast: false
       matrix:
         config:
-        - {runs_on: ['self-hosted', 'CPU'], arch: 'x86_64'}
+        - {runs_on: 'ubuntu-22.04', arch: 'x86_64'}
         - {runs_on: 'ubuntu-22.04-arm', arch: 'aarch64'}
 
 
@@ -37,12 +39,7 @@ jobs:
       id-token: write
       contents: read
 
-    # The self-hosted x86_64 runner ships a docker CLI (1.52) newer than the
-    # daemon's max API version (1.43), so unpinned docker commands fail with
-    # "client version 1.52 is too new". Pin at the job level so every step
-    # (including cibuildwheel's internal docker invocations) inherits it.
     env:
-      DOCKER_API_VERSION: "1.43"
       BUILD_ARCH: ${{ matrix.config.arch }}
       PUBLISH_NIGHTLY: ${{ github.repository == 'triton-lang/triton' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
 
@@ -64,6 +61,10 @@ jobs:
       - id: check-version
         name: Check latest version
         run: |
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            echo "new_commit=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           PACKAGE_DATE=$(python3 -c 'import re, urllib.request; html = urllib.request.urlopen("https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/triton-nightly/", timeout=30).read().decode(); dates = re.findall(r"triton[-_]nightly-[^\"<>/]+?\.dev(\d+)", html); assert dates, "No published nightly wheel versions found"; print(max(dates))')
           LATEST_DATE=$(TZ=UTC0 git show --quiet --date='format-local:%Y%m%d%H%M%S' --format="%cd")
           if cmp -s <(echo "$PACKAGE_DATE") <(echo "$LATEST_DATE"); then
@@ -89,10 +90,7 @@ jobs:
           python3 -m uv venv "$RUNNER_TEMP/wheel-tools"
           python3 -m uv pip install --python "$RUNNER_TEMP/wheel-tools/bin/python" --group wheels
           export PATH="$RUNNER_TEMP/wheel-tools/bin:$PATH"
-          # Pass MAX_JOBS=4 because, at time of writing, the VM "only" has 32GB
-          # of RAM and OOMs while building if we give it the default number of
-          # workers (2 * NUM_CPUs).
-          export CIBW_ENVIRONMENT="MAX_JOBS=4 \
+          export CIBW_ENVIRONMENT="MAX_JOBS=2 \
                   TRITON_EXT_ENABLED=ON \
                   TRITON_BUILD_WITH_CLANG_LLD=1"
 
@@ -123,12 +121,12 @@ jobs:
 
           # Build once on 3.12; cibuildwheel reuses and tests the abi3 wheel through 3.15.
           export CIBW_BUILD="cp3{12,13,14,15}-manylinux_$BUILD_ARCH"
-          export CIBW_ENVIRONMENT="MAX_JOBS=4 TRITON_EXT_ENABLED=ON TRITON_BUILD_WITH_CLANG_LLD=1 TRITON_STABLE_ABI=ON"
+          export CIBW_ENVIRONMENT="MAX_JOBS=2 TRITON_EXT_ENABLED=ON TRITON_BUILD_WITH_CLANG_LLD=1 TRITON_STABLE_ABI=ON"
           python3 -m cibuildwheel . --output-dir wheelhouse
 
           # Free-threaded CPython uses version-specific native wheels, never abi3.
           export CIBW_BUILD="cp3{14,15}t-manylinux_$BUILD_ARCH"
-          export CIBW_ENVIRONMENT="MAX_JOBS=4 TRITON_EXT_ENABLED=ON TRITON_BUILD_WITH_CLANG_LLD=1 TRITON_BUILD_PROTON=OFF"
+          export CIBW_ENVIRONMENT="MAX_JOBS=2 TRITON_EXT_ENABLED=ON TRITON_BUILD_WITH_CLANG_LLD=1 TRITON_BUILD_PROTON=OFF"
           python3 -m cibuildwheel . --output-dir wheelhouse
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
