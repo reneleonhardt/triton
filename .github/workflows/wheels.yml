@@ -105,14 +105,16 @@ jobs:
 
           CIBW_TEST_REQUIRES=$(python -c 'import tomllib; print(" ".join(tomllib.load(open("pyproject.toml", "rb"))["dependency-groups"]["wheel-tests"]))')
           export CIBW_TEST_REQUIRES
+          # Copy tests so conftest.py cannot put the source package ahead of the wheel.
+          export CIBW_BEFORE_TEST="mkdir -p wheel-tests && cp {project}/python/conftest.py {project}/pytest.ini wheel-tests/ && cp -r {project}/python/test wheel-tests/"
           export CIBW_TEST_COMMAND="python -m pytest -s --tb=short \
-                  {project}/python/test/unit/runtime/test_bindings.py::test_free_threaded_bindings \
-                  {project}/python/test/unit/runtime/test_bindings.py::test_llvm_ir_to_bitcode \
-                  {project}/python/test/unit/runtime/test_bindings.py::test_llvm_ir_to_bitcode_reports_invalid_ir \
-                  {project}/python/test/unit/runtime/test_bindings.py::test_binding_classes_released_at_shutdown \
-                  {project}/python/test/unit/runtime/test_build.py::test_compile_module \
-                  {project}/python/test/unit/language/test_frontend.py && \
-                  python -m pytest -s --tb=short {project}/python/test/gluon/test_frontend.py"
+                  wheel-tests/test/unit/runtime/test_bindings.py::test_free_threaded_bindings \
+                  wheel-tests/test/unit/runtime/test_bindings.py::test_llvm_ir_to_bitcode \
+                  wheel-tests/test/unit/runtime/test_bindings.py::test_llvm_ir_to_bitcode_reports_invalid_ir \
+                  wheel-tests/test/unit/runtime/test_bindings.py::test_binding_classes_released_at_shutdown \
+                  wheel-tests/test/unit/runtime/test_build.py::test_compile_module \
+                  wheel-tests/test/unit/language/test_frontend.py && \
+                  python -m pytest -s --tb=short wheel-tests/test/gluon/test_frontend.py"
 
           # Version-specific wheel for Python 3.11.
           export CIBW_BUILD="cp311-manylinux_$BUILD_ARCH"
