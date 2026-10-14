@@ -2,7 +2,7 @@ name: Wheels
 on:
   workflow_dispatch:
   push:
-    branches: [chore/update-dependencies]
+    branches: [chore/update-dependencies-ci]
   pull_request:
     paths:
       - .github/workflows/wheels.yml
