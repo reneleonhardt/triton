@@ -23,7 +23,7 @@ jobs:
 
   Build-Wheels:
     if: github.repository == 'triton-lang/triton' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
-    timeout-minutes: 180
+    timeout-minutes: 240
     runs-on: ${{ matrix.config.runs_on }}
 
     strategy:
@@ -82,6 +82,14 @@ jobs:
         run: |
           printf '\n[build_ext]\nbase-dir=/project\n' >> python/setup.cfg
 
+      - name: Cache compiler objects
+        if: steps.check-version.outputs.new_commit == 'true' && github.event_name != 'pull_request'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: wheels-ccache-${{ matrix.config.arch }}-${{ github.sha }}
+          restore-keys: wheels-ccache-${{ matrix.config.arch }}-
+
       - name: Build wheels
         if: ${{ steps.check-version.outputs.new_commit == 'true' }}
         run: |
@@ -90,12 +98,20 @@ jobs:
           python3 -m uv venv "$RUNNER_TEMP/wheel-tools"
           python3 -m uv pip install --python "$RUNNER_TEMP/wheel-tools/bin/python" --group wheels
           export PATH="$RUNNER_TEMP/wheel-tools/bin:$PATH"
-          export CIBW_ENVIRONMENT="MAX_JOBS=2 \
+          wheel_environment="MAX_JOBS=2 \
                   TRITON_EXT_ENABLED=ON \
-                  TRITON_BUILD_WITH_CLANG_LLD=1"
+                  TRITON_BUILD_WITH_CLANG_LLD=1 \
+                  TRITON_BUILD_DIR=/host$RUNNER_TEMP/triton-build \
+                  TRITON_HOME=/host$RUNNER_TEMP/triton-deps \
+                  TRITON_APPEND_CMAKE_ARGS=-DTRITON_BUILD_UT=OFF \
+                  CCACHE_DIR=/host$RUNNER_TEMP/ccache \
+                  CCACHE_BASEDIR=/project \
+                  CCACHE_MAXSIZE=2G"
 
-          # Install Clang/LLD in the manylinux build image.
-          export CIBW_BEFORE_ALL="dnf install clang lld -y"
+          # Share native objects across ABIs; compiler flags keep bindings separate.
+          export CIBW_BEFORE_ALL="dnf install clang lld ccache -y"
+          export CIBW_BEFORE_BUILD="ccache --zero-stats"
+          export CIBW_BEFORE_TEST="ccache --show-stats"
 
           # Skip auditwheel's dependency-bundling pass on libtriton.so. Without
           # this, every shared library libtriton.so links against is copied into
@@ -119,17 +135,18 @@ jobs:
           # Version-specific wheel for Python 3.11.
           export CIBW_BUILD="cp311-manylinux_$BUILD_ARCH"
           export CIBW_SKIP="cp{35,36,37,38,39,310}-*"
-          python3 -m cibuildwheel . --output-dir wheelhouse
+          export CIBW_ENVIRONMENT="$wheel_environment TRITON_STABLE_ABI=OFF TRITON_BUILD_PROTON=ON"
+          time python3 -m cibuildwheel . --output-dir wheelhouse
 
           # Build once on 3.12; cibuildwheel reuses and tests the abi3 wheel through 3.15.
           export CIBW_BUILD="cp3{12,13,14,15}-manylinux_$BUILD_ARCH"
-          export CIBW_ENVIRONMENT="MAX_JOBS=2 TRITON_EXT_ENABLED=ON TRITON_BUILD_WITH_CLANG_LLD=1 TRITON_STABLE_ABI=ON"
-          python3 -m cibuildwheel . --output-dir wheelhouse
+          export CIBW_ENVIRONMENT="$wheel_environment TRITON_STABLE_ABI=ON TRITON_BUILD_PROTON=ON"
+          time python3 -m cibuildwheel . --output-dir wheelhouse
 
           # Free-threaded CPython uses version-specific native wheels, never abi3.
           export CIBW_BUILD="cp3{14,15}t-manylinux_$BUILD_ARCH"
-          export CIBW_ENVIRONMENT="MAX_JOBS=2 TRITON_EXT_ENABLED=ON TRITON_BUILD_WITH_CLANG_LLD=1 TRITON_BUILD_PROTON=OFF"
-          python3 -m cibuildwheel . --output-dir wheelhouse
+          export CIBW_ENVIRONMENT="$wheel_environment TRITON_STABLE_ABI=OFF TRITON_BUILD_PROTON=OFF"
+          time python3 -m cibuildwheel . --output-dir wheelhouse
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

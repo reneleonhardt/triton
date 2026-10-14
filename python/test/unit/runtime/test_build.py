@@ -4,8 +4,14 @@ import argparse
 import hashlib
 import io
 import json
+import os
+import re
+import shlex
+import subprocess
+import sys
 import tarfile
 import tempfile
+import textwrap
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -86,6 +92,45 @@ def test_build_python_linker_flags(platform, monkeypatch, tmp_path):
     assert ("-bundle" in cmd) == (platform == "darwin")
     assert ("-shared" in cmd) == (platform != "darwin")
     assert ("dynamic_lookup" in cmd) == (platform == "darwin")
+
+
+def test_wheel_build_reuses_objects_without_leaking_abi_settings(tmp_path):
+    root = Path(__file__).resolve().parents[4]
+    workflow = (root / ".github/workflows/wheels.yml").read_text()
+    script = textwrap.dedent(re.search(r"- name: Build wheels\n.*?run: \|\n(.*?)(?=\n      -)", workflow, re.DOTALL)[1])
+    python = tmp_path / "python3"
+    python.write_text(f"""#!{sys.executable}
+import json, os, sys
+if sys.argv[1:3] == ['-m', 'cibuildwheel']:
+    with open(os.environ['BUILD_LOG'], 'a') as output:
+        output.write(json.dumps(dict(os.environ)) + '\\n')
+elif len(sys.argv) > 1 and sys.argv[1] == '-c':
+    print('pytest')
+""")
+    python.chmod(0o755)
+    (tmp_path / "python").symlink_to(python)
+    log = tmp_path / "builds.jsonl"
+    subprocess.run(
+        ["bash", "-e", "-c", script],
+        check=True,
+        capture_output=True,
+        env=dict(
+            os.environ,
+            PATH=f"{tmp_path}:{os.environ['PATH']}",
+            RUNNER_TEMP=str(tmp_path),
+            BUILD_ARCH="aarch64",
+            BUILD_LOG=str(log),
+        ),
+    )
+    builds = [json.loads(line) for line in log.read_text().splitlines()]
+    environments = [dict(token.split("=", 1) for token in shlex.split(build["CIBW_ENVIRONMENT"])) for build in builds]
+    assert [env["TRITON_STABLE_ABI"] for env in environments] == ["OFF", "ON", "OFF"]
+    assert [env["TRITON_BUILD_PROTON"] for env in environments] == ["ON", "ON", "OFF"]
+    for key in ["TRITON_BUILD_DIR", "TRITON_HOME", "CCACHE_DIR"]:
+        assert len({env[key] for env in environments}) == 1
+        assert environments[0][key].startswith(f"/host{tmp_path}/")
+    assert all(env["TRITON_APPEND_CMAKE_ARGS"] == "-DTRITON_BUILD_UT=OFF" for env in environments)
+    assert all("ccache" in build["CIBW_BEFORE_ALL"] for build in builds)
 
 
 def test_compile_module_bad_cache(fresh_triton_cache, monkeypatch):
